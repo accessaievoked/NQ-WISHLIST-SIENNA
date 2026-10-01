@@ -67,24 +67,31 @@ async function gql(query, variables = {}) {
   return json.data;
 }
 
-// ─── CORS Helper - Handle www and non-www variants ──────────────────────────────
+// ─── CORS Helper ──────────────────────────────────────────────────────────────
+// ALLOWED_ORIGIN may be a single origin or a comma-separated list, e.g.
+//   https://siennastore.com,https://www.siennastore.com
+// Shopify preview / theme-editor origins are always allowed so testing works.
+const ALWAYS_ALLOWED = [
+  'https://siennastore.com',
+  'https://www.siennastore.com',
+];
+const SHOPIFY_PREVIEW_RE = /^https:\/\/[a-z0-9-]+\.(myshopify\.com|shopifypreview\.com)$/i;
+
 function getCORSOrigin(requestOrigin) {
-  // If wildcard, allow all
   if (ALLOWED_ORIGIN === '*') return '*';
-  
-  // Exact match
-  if (requestOrigin === ALLOWED_ORIGIN) return ALLOWED_ORIGIN;
-  
-  // Check www variants
-  const withoutWww = ALLOWED_ORIGIN.replace('https://www.', 'https://');
-  const withWww = ALLOWED_ORIGIN.replace('https://', 'https://www.');
-  
-  if (requestOrigin === withoutWww || requestOrigin === withWww) {
-    return requestOrigin; // Return the actual requesting origin
+
+  const configured = ALLOWED_ORIGIN.split(',').map(o => o.trim().replace(/\/$/, '')).filter(Boolean);
+  const list = new Set(ALWAYS_ALLOWED.concat(configured));
+  // add www / non-www variants of everything configured
+  configured.forEach(o => {
+    list.add(o.replace('https://www.', 'https://'));
+    list.add(o.replace('https://', 'https://www.'));
+  });
+
+  if (requestOrigin && (list.has(requestOrigin) || SHOPIFY_PREVIEW_RE.test(requestOrigin))) {
+    return requestOrigin;
   }
-  
-  // Default to ALLOWED_ORIGIN if no match
-  return ALLOWED_ORIGIN;
+  return ALWAYS_ALLOWED[0];
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -98,7 +105,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-wishlist-secret');
   res.setHeader('Vary', 'Origin');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
   // Secret key validation (lightweight protection)
   if (API_SECRET && req.headers['x-wishlist-secret'] !== API_SECRET) {
